@@ -1,8 +1,10 @@
+import settings
 from PyQt5.QtCore import Qt
 from PyQt5.QtWidgets import (QCheckBox, QFileDialog, QGridLayout, QGroupBox, QLabel, QMessageBox, QPlainTextEdit,
                              QPushButton, QSpinBox, QVBoxLayout, QWidget)
 from message_handler import LoggingMessageHandler
-import settings
+from netmiko import ConnectHandler
+from netmiko.ssh_exception import NetMikoTimeoutException, NetMikoAuthenticationException
 
 
 class LoadPage(QWidget):
@@ -15,8 +17,8 @@ class LoadPage(QWidget):
         layout = QGridLayout()  # page will use a grid layout
 
         self.config = ''  # this variable overwritten after config is opened.
-
         '''Pulls from router tab hopefully'''
+        
         self._log_viewer = QPlainTextEdit(
             whatsThis="This displays the messages generated when loading the router.",
                 readOnly=True)
@@ -36,28 +38,31 @@ class LoadPage(QWidget):
 
         optimisation = QGroupBox("Options")
         optimisation_layout = QVBoxLayout()
-
-        self._opt1_button = QCheckBox("Verify IOS\n Version",
+        
+        self._verify_ios = ''  # Verifies whether the verify IOS button has been checked or not.
+        self._ios_verify = QCheckBox("Verify IOS\n Version",
                 whatsThis="Verify the IOS version before loading.",
-                checked=True, stateChanged=self._opt1_changed)
-        optimisation_layout.addWidget(self._opt1_button)
-        self._opt2_button = QCheckBox("Backup Current \n Config",
+                checked=False, stateChanged=self.ios_verify)
+        optimisation_layout.addWidget(self._ios_verify)
+        
+        self._backup_config = ''  # If the box below is checked, write the current config on the box to a text file.
+        self._config_backup = QCheckBox("Backup Current \n Config",
                 whatsThis="Backup current config before starting.",
-                checked=True, stateChanged=self._opt2_changed)
-        optimisation_layout.addWidget(self._opt2_button)
-
+                checked=False, stateChanged=self.config_backup)
+        optimisation_layout.addWidget(self._config_backup)
+    
         optimisation.setLayout(optimisation_layout)
         layout.addWidget(optimisation, 1, 1)
-
+    
         options = QGroupBox("Load Options")
         options_layout = QGridLayout()
-
+    
         options_layout.addWidget(QLabel("test1"), 2, 0)
         self._resources_edit = QSpinBox(
                 whatsThis="test1",
                 minimum=1)
         options_layout.addWidget(self._resources_edit, 2, 1)
-
+    
         options_layout.addWidget(QLabel("Timeout"), 3, 0)
         self._timeout_edit = QSpinBox(
                 whatsThis="Number of milliseconds to adjust config load speed",
@@ -104,42 +109,59 @@ class LoadPage(QWidget):
             logger.status_message("Once entered click Verify.")
         else:
             logger.clear()
-            logger.status_message("Verifying Cisco IOS version")
-            logger.status_message("Loading Configuration....")
+            device = settings.device[0]
+            try:
+                router = ConnectHandler(**device)  # Connect to the Device
+                logger.status_message("Loading Configuration....")
+                if self._verify_ios == 'yes':
+                    logger.status_message("Verifying Cisco IOS version.")
+                    router.send_command("show version")
+                    
+                if self._backup_config == 'yes':
+                    logger.status_message("Backing up the current config.")
+                    router.send_command("show run")
+                
+                router.send_config_set(self.congif, delay_factor=4)
+                
+                router.disconnect()
+                logger.status_message('Load Complete')
+            except ValueError:
+                logger.status_message("Console is not working. Make sure you have connectivity.")
+            except TimeoutError:
+                logger.status_message("Telnet Error: Make sure the IP address is correct.")
+            except NetMikoTimeoutException:
+                logger.status_message("SSH Error: Make sure the IP address is correct.")
+            except NetMikoAuthenticationException:
+                logger.status_message("Check your username/password. Make sure you have an account on this device.")
+            pass
             logger.status_message("Load Complete")
 
-    def _missing_prereq(self, missing):
-        """ Tell the user about a missing prerequisite. """
-
-        QMessageBox.warning(self, self.label, "The project cannot be built because the name of the {0} has "
-                        "not been set.".format(missing))
-
-    def _opt1_changed(self, state):
+    def ios_verify(self, state):
         """ Invoked when the user clicks on the no asserts button. """
-
-        if state == Qt.Unchecked:
-            self._opt2_button.setCheckState(Qt.Unchecked)
-
-    def _opt2_changed(self, state):
-        """ Invoked when the user clicks on the no docstrings button. """
-
+        
         if state == Qt.Checked:
-            self._opt1_button.setCheckState(Qt.Checked)
+            self._verify_ios = 'yes'
+        
+    def config_backup(self, state):
+        """ Invoked when the user clicks on the no docstrings button. """
+        
+        if state == Qt.Checked:
+            self._backup_config = 'yes'
 
     def _run_qmake_changed(self, state):
         """ Invoked when the user clicks on the run qmake button. """
 
         if state == Qt.Unchecked:
             self._run_make_button.setCheckState(Qt.Unchecked)
-
+        
     def _run_make_changed(self, state):
         """ Invoked when the user clicks on the run make button. """
-
+        
         if state == Qt.Unchecked:
             self._run_application_button.setCheckState(Qt.Unchecked)
         else:
             self._run_qmake_button.setCheckState(Qt.Checked)
-
+        
     def _zero(self, _):
         """ Invoked when the user clicks on the run application button. """
         logger = LoggingMessageHandler(bool(),
