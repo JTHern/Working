@@ -1,3 +1,8 @@
+import serial.tools.list_ports
+ports = list(serial.tools.list_ports.comports())
+for p in ports:
+    print p
+
 import settings
 from PyQt5.QtCore import Qt
 from PyQt5.QtWidgets import (QCheckBox, QHBoxLayout, QGridLayout, QGroupBox, QLabel, QLineEdit, QMessageBox,
