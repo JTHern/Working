@@ -121,7 +121,7 @@ class LoadPage(QWidget):
                     logger.status_message("Backing up the current config.")
                     router.send_command("show run")
                 
-                router.send_config_set(self.congif, delay_factor=4)
+                router.send_config_set(self.config, delay_factor=4)
                 
                 router.disconnect()
                 logger.status_message('Load Complete')
