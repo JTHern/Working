@@ -107,6 +107,41 @@ class LoadPage(QWidget):
             logger.clear()
             logger.status_message("Enter Credentials on Router Info tab.")
             logger.status_message("Once entered click Verify.")
+            return
+        if settings.device[0]['device_type'] == 'cisco_ios_serial':
+            logger.clear()
+            device = settings.device[0]
+            try:
+                router = ConnectHandler(**device)  # Connect to the Device
+                logger.status_message("Loading Configuration....")
+                if self._verify_ios == 'yes':
+                    logger.status_message("Verifying Cisco IOS version.")
+                    router.send_command("show version")
+                    
+                if self._backup_config == 'yes':
+                    logger.status_message("Backing up the current config.")
+                    router.send_command("show run")
+                enable = router.check_enable_mode
+                if enable == False:
+                    router.enable()
+                    pass
+                router.config_mode()
+                for line in self.config.text()
+                    router.send_command(line, delay_factor=4)
+                    logger.status_message(line)
+                
+                router.disconnect()
+                logger.status_message('Load Complete')
+            except ValueError:
+                logger.status_message("Console is not working. Make sure you have connectivity.")
+            except TimeoutError:
+                logger.status_message("Telnet Error: Make sure the IP address is correct.")
+            except NetMikoTimeoutException:
+                logger.status_message("SSH Error: Make sure the IP address is correct.")
+            except NetMikoAuthenticationException:
+                logger.status_message("Check your username/password. Make sure you have an account on this device.")
+            pass
+            logger.status_message("Load Complete")
         else:
             logger.clear()
             device = settings.device[0]
