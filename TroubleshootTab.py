@@ -244,3 +244,33 @@ class Troubleshoot(QWidget):
             except NetMikoAuthenticationException:
                 logger.status_message("Check your username/password. Make sure you have an account on this device.")
             pass
+    
+    def _vlans(self, _):
+        """ Invoked when the user clicks the eigrp button. """
+
+        logger = LoggingMessageHandler(bool(self._verbose_button.checkState()),
+                self._log_viewer)
+        if settings.device == []:
+            logger.clear()
+            logger.status_message("Enter Credentials on Router Info tab.")
+            logger.status_message("Once entered click Verify.")
+        else:
+            logger.clear()
+            device = settings.device[0]
+            try:
+                router = ConnectHandler(**device)  # Connect to the Device
+                logger.status_message("Connecting....")
+                output = router.send_command('show vlan status')
+                router.disconnect()
+                logger.status_message(f'{output}')
+                
+            except ValueError:
+                logger.status_message("Console is not working. Make sure you have connectivity.")
+            except TimeoutError:
+                logger.status_message("Telnet Error: Make sure the IP address is correct.")
+            except NetMikoTimeoutException:
+                logger.status_message("SSH Error: Make sure the IP address is correct.")
+            except NetMikoAuthenticationException:
+                logger.status_message("Check your username/password. Make sure you have an account on this device.")
+            pass
+      
