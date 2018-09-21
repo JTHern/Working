@@ -1,140 +1,270 @@
 import settings
-import re
-from PyQt5.QtCore import (Qt, QThread, pyqtSignal)
-from PyQt5.QtWidgets import (QCheckBox, QFileDialog, QGridLayout, QGroupBox, QPlainTextEdit,
-                             QPushButton, QVBoxLayout, QWidget)
 from message_handler import LoggingMessageHandler
+from PyQt5.QtWidgets import (QCheckBox, QGridLayout, QLabel, QLineEdit, QMessageBox, QPlainTextEdit, QPushButton,
+                             QSpinBox, QVBoxLayout, QWidget)
 from netmiko import ConnectHandler
 from netmiko.ssh_exception import NetMikoTimeoutException, NetMikoAuthenticationException
 
 
-class LoadThread(QThread):
-    signal = pyqtSignal('PyQt_PyObject')
-    # This Class threads the connection so we don't freeze the entire program waiting on the connection to take place.
+class Troubleshoot(QWidget):
+    """ The GUI for the build page of a project. """
+
+    # The page's label.
+    label = "Troubleshooting"
 
     def __init__(self):
-        QThread.__init__(self)
-        self.config = ''
-
-    # run method gets called when we start() the thread
-    def run(self):
-        if self.config == '':
-            self.signal.emit("No config to load.")
-            return
-        if settings.device == []:
-            self.signal.emit("Enter Credentials on Router Info tab.")
-            self.signal.emit("Once entered click Verify.")
-            return
-        if settings.device[0]['device_type'] == 'cisco_ios_serial':
-            device = settings.device[0]
-            try:
-                self.signal.emit('Loading Configuration....')
-                router = ConnectHandler(**device)  # Connect to the Device
-                self.signal.emit('...connected...')
-                router.enable()
-                self.signal.emit('...this may take a while...')
-                router.send_config_set(self.config)
-                new_config = router.send_command('show run')
-                self.signal.emit(new_config)
-                router.disconnect()
-                self.signal.emit('Load Complete')
-            except ValueError:
-                self.signal.emit("Console Error: Make sure you have connectivity.")
-            except TimeoutError:
-                self.signal.emit("Timeout Error: Make sure you are still connected")
-            except NetMikoTimeoutException:
-                self.signal.emit("Timeout Error: Make sure you are still connected")
-            except NetMikoAuthenticationException:
-                self.signal.emit("Check your username/password. Make sure you have an account on this device.")
-        else:
-            device = settings.device[0]
-            try:
-                self.signal.emit('Loading Configuration....')
-                router = ConnectHandler(**device)  # Connect to the Device
-                self.signal.emit('...connected...')
-                router.enable()
-                self.signal.emit('...this may take a while...')
-                router.send_config_set(self.config)
-                new_config = router.send_command('show run')
-                self.signal.emit(new_config)
-                router.disconnect()
-                self.signal.emit('Load Complete')
-            except ValueError:
-                self.signal.emit("User does not have permission to make these changes.")
-            except TimeoutError:
-                self.signal.emit("Telnet Error: Make sure the IP address is correct.")
-            except NetMikoTimeoutException:
-                self.signal.emit("SSH Error: Make sure the IP address is correct.")
-            except NetMikoAuthenticationException:
-                self.signal.emit("Check your username/password. Make sure you have an account on this device.")
-
-
-class LoadPage(QWidget):
-    label = "Load"
-
-    def __init__(self, parent=None):
         """ Initialise the page. """
 
-        super().__init__(parent)
-        layout = QGridLayout()  # page will use a grid layout
+        super().__init__()
 
-        self.config = ''  # this variable overwritten after config is opened.
-        '''Pulls from router tab hopefully'''
+        self.project = None
 
-        self._log_viewer = QPlainTextEdit(readOnly=True)
-        layout.addWidget(self._log_viewer, 0, 0, 5, 1)
+        # Create the page's GUI.
+        layout = QGridLayout()
 
-        openfile = QPushButton("Open", clicked=self._open)
-        openfile.setToolTip("Open a text Config.")
-        layout.addWidget(openfile, 0, 1)
+        self._log_viewer = QPlainTextEdit(
+            whatsThis="This displays the messages generated when loading the router.",
+            readOnly=True)
+        layout.addWidget(self._log_viewer, 0, 0, 3, 5)
 
-        load_options = QGroupBox("Load Options")
-        load_layout = QVBoxLayout()
+        self.ping = QPushButton("ping",
+                           whatsThis="Ping a Device",
+                           clicked=self._ping
+                           )
+        layout.addWidget(self.ping, 4, 0)
 
-        self._backup_config = ''  # If the box below is checked, write the current config on the box to a text file.
-        self._config_backup = QCheckBox("Backup Current \n Config", checked=False,
-                                        stateChanged=self.config_backup)
-        self._config_backup.setToolTip("Optional - backup the current config before loading the new config.")
-        load_layout.addWidget(self._config_backup)
+        traceroute = QPushButton("Traceroute",
+                                 whatsThis="Traceroute to a device.",
+                                 clicked=self._traceroute)
+        layout.addWidget(traceroute, 4, 1)
 
-        load_options.setLayout(load_layout)
-        layout.addWidget(load_options, 1, 1)
+        self.ip = QLineEdit()
+        layout.addWidget(self.ip, 4, 2)
 
-        self.load = QPushButton("Load", clicked=self._load)  # The load button which carries out the load logic.
-        self.load.setToolTip("Load a new configuration.")
-        layout.addWidget(self.load, 2, 1)
-        self.load_thread = LoadThread()
-        self.load_thread.signal.connect(self.finished)
+        routes = QPushButton("Routes",
+                             whatsThis="show ip route",
+                             clicked=self._routes)
+        layout.addWidget(routes, 5, 0)
+
+        interfaces = QPushButton("Interfaces",
+                                 whatsThis="show ip interface brief",
+                                 clicked=self._interfaces)
+        layout.addWidget(interfaces, 5, 1)
+
+        dmvpn = QPushButton("DMVPN",
+                            whatsThis="show crypto ikev2 sa",
+                            clicked=self._dmvpn)
+        layout.addWidget(dmvpn, 5, 2)
+
+        ospf = QPushButton("OSPF",
+                           whatsThis="show ip ospf neigh",
+                           clicked=self._ospf)
+        layout.addWidget(ospf, 5, 3)
+
+        eigrp = QPushButton("EIGRP",
+                            whatsThis="show ip eigrp neigh",
+                            clicked=self._eigrp)
+        layout.addWidget(eigrp, 5, 4)
 
         self.setLayout(layout)
 
     '''actions'''
 
-    def _open(self, _):
-        """ Invoked when the user clicks the open button. """
+    def _ping(self, _):
+        """ Invoked when the user clicks the ping button. """
+
         logger = LoggingMessageHandler(bool(), self._log_viewer)
-        fltr = "Text or Config (*.txt *.cfg)"
-        obj = QFileDialog.getOpenFileName(self, 'Config to Load', '', fltr)
-        if obj[0] == '':
-            return
-        with open(obj[0], 'r') as file:
-            config = file.read()
+        if settings.device == []:
             logger.clear()
-            logger.status_message(config)
-            logger.status_message('Remove extra lines from the text file, such as:\n '
-                                  ' enable \n config t \n building \n'
-                                  ' version \n etc...')
-            self.load_thread.config = config
+            logger.status_message("Enter Credentials on Router Info tab.")
+            logger.status_message("Once entered click Verify.")
+        else:
+            logger.clear()
+            device = settings.device[0]
+            try:
+                router = ConnectHandler(**device)  # Connect to the Device
+                logger.status_message("Connecting....")
+                output = router.send_command(f'ping {self.ip.text()}')
+                router.disconnect()
+                logger.status_message(f'{output}')
+            except ValueError:
+                logger.status_message("Console is not working. Make sure you have connectivity.")
+            except TimeoutError:
+                logger.status_message("Telnet Error: Make sure the IP address is correct.")
+            except NetMikoTimeoutException:
+                logger.status_message("SSH Error: Make sure the IP address is correct.")
+            except NetMikoAuthenticationException:
+                logger.status_message("Check your username/password. Make sure you have an account on this device.")
+            pass
 
-    def _load(self):
-        self.load_thread.start()
+    def _traceroute(self, _):
+        """ Invoked when the user clicks the traceroute button. """
 
-    def finished(self, result):
         logger = LoggingMessageHandler(bool(), self._log_viewer)
-        logger.status_message(result)
+        if settings.device == []:
+            logger.clear()
+            logger.status_message("Enter Credentials on Router Info tab.")
+            logger.status_message("Once entered click Verify.")
+        else:
+            logger.clear()
+            device = settings.device[0]
+            try:
+                router = ConnectHandler(**device)  # Connect to the Device
+                logger.status_message("Connecting....")
+                output = router.send_command(f'traceroute {self.ip.text()}')
+                router.disconnect()
+                logger.status_message(f'{output}')
+            except ValueError:
+                logger.status_message("Console is not working. Make sure you have connectivity.")
+            except TimeoutError:
+                logger.status_message("Telnet Error: Make sure the IP address is correct.")
+            except NetMikoTimeoutException:
+                logger.status_message("SSH Error: Make sure the IP address is correct.")
+            except NetMikoAuthenticationException:
+                logger.status_message("Check your username/password. Make sure you have an account on this device.")
+            pass
 
-    def config_backup(self, state):
-        """ currently not operational """
+    def _routes(self, _):
+        """ Invoked when the user clicks the routes button. """
 
-        if state == Qt.Checked:
-            self._backup_config = 'yes'
+        logger = LoggingMessageHandler(bool(), self._log_viewer)
+
+        if settings.device == []:
+            logger.clear()
+            logger.status_message("Enter Credentials on Router Info tab.")
+            logger.status_message("Once entered click Verify.")
+        else:
+            logger.clear()
+            device = settings.device[0]
+            try:
+                router = ConnectHandler(**device)  # Connect to the Device
+                logger.status_message("Connecting....")
+                output = router.send_command('show ip route')
+                router.disconnect()
+                logger.status_message(f'{output}')
+
+            except ValueError:
+                logger.status_message("Console is not working. Make sure you have connectivity.")
+            except TimeoutError:
+                logger.status_message("Telnet Error: Make sure the IP address is correct.")
+            except NetMikoTimeoutException:
+                logger.status_message("SSH Error: Make sure the IP address is correct.")
+            except NetMikoAuthenticationException:
+                logger.status_message("Check your username/password. Make sure you have an account on this device.")
+            pass
+
+    def _interfaces(self, _):
+        """ Invoked when the user clicks the interfaces button. """
+
+        logger = LoggingMessageHandler(bool(), self._log_viewer)
+
+        if settings.device == []:
+            logger.clear()
+            logger.status_message("Enter Credentials on Router Info tab.")
+            logger.status_message("Once entered click Verify.")
+        else:
+            logger.clear()
+            device = settings.device[0]
+            try:
+                router = ConnectHandler(**device)  # Connect to the Device
+                logger.status_message("Connecting....")
+                output = router.send_command('show ip interface brief')
+                router.disconnect()
+                logger.status_message(f'{output}')
+
+            except ValueError:
+                logger.status_message("Console is not working. Make sure you have connectivity.")
+            except TimeoutError:
+                logger.status_message("Telnet Error: Make sure the IP address is correct.")
+            except NetMikoTimeoutException:
+                logger.status_message("SSH Error: Make sure the IP address is correct.")
+            except NetMikoAuthenticationException:
+                logger.status_message("Check your username/password. Make sure you have an account on this device.")
+            pass
+
+    def _dmvpn(self, _):
+        """ Invoked when the user clicks the dmvpn button. """
+
+        logger = LoggingMessageHandler(bool(), self._log_viewer)
+        if settings.device == []:
+            logger.clear()
+            logger.status_message("Enter Credentials on Router Info tab.")
+            logger.status_message("Once entered click Verify.")
+            return
+        else:
+            logger.clear()
+            device = settings.device[0]
+            try:
+                router = ConnectHandler(**device)  # Connect to the Device
+                logger.status_message("Connecting....")
+                output = router.send_command('show crypto ikev2 sa')
+                router.disconnect()
+                logger.status_message(f'{output}')
+
+            except ValueError:
+                logger.status_message("Console is not working. Make sure you have connectivity.")
+            except TimeoutError:
+                logger.status_message("Telnet Error: Make sure the IP address is correct.")
+            except NetMikoTimeoutException:
+                logger.status_message("SSH Error: Make sure the IP address is correct.")
+            except NetMikoAuthenticationException:
+                logger.status_message("Check your username/password. Make sure you have an account on this device.")
+            pass
+
+    def _ospf(self, _):
+        """ Invoked when the user clicks the ospf button. """
+
+        logger = LoggingMessageHandler(bool(), self._log_viewer)
+
+        if settings.device == []:
+            logger.clear()
+            logger.status_message("Enter Credentials on Router Info tab.")
+            logger.status_message("Once entered click Verify.")
+        else:
+            logger.clear()
+            device = settings.device[0]
+            try:
+                router = ConnectHandler(**device)  # Connect to the Device
+                logger.status_message("Connecting....")
+                output = router.send_command('show ip ospf neigh')
+                router.disconnect()
+                logger.status_message(f'{output}')
+
+            except ValueError:
+                logger.status_message("Console is not working. Make sure you have connectivity.")
+            except TimeoutError:
+                logger.status_message("Telnet Error: Make sure the IP address is correct.")
+            except NetMikoTimeoutException:
+                logger.status_message("SSH Error: Make sure the IP address is correct.")
+            except NetMikoAuthenticationException:
+                logger.status_message("Check your username/password. Make sure you have an account on this device.")
+            pass
+
+    def _eigrp(self, _):
+        """ Invoked when the user clicks the eigrp button. """
+
+        logger = LoggingMessageHandler(bool(), self._log_viewer)
+
+        if settings.device == []:
+            logger.clear()
+            logger.status_message("Enter Credentials on Router Info tab.")
+            logger.status_message("Once entered click Verify.")
+        else:
+            logger.clear()
+            device = settings.device[0]
+            try:
+                router = ConnectHandler(**device)  # Connect to the Device
+                logger.status_message("Connecting....")
+                output = router.send_command('show ip eigrp neigh')
+                router.disconnect()
+                logger.status_message(f'{output}')
+
+            except ValueError:
+                logger.status_message("Console is not working. Make sure you have connectivity.")
+            except TimeoutError:
+                logger.status_message("Telnet Error: Make sure the IP address is correct.")
+            except NetMikoTimeoutException:
+                logger.status_message("SSH Error: Make sure the IP address is correct.")
+            except NetMikoAuthenticationException:
+                logger.status_message("Check your username/password. Make sure you have an account on this device.")
+            pass
