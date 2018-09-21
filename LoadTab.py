@@ -1,206 +1,139 @@
 import settings
-from PyQt5.QtCore import Qt
-from PyQt5.QtWidgets import (QCheckBox, QFileDialog, QGridLayout, QGroupBox, QLabel, QMessageBox, QPlainTextEdit,
-                             QPushButton, QSpinBox, QVBoxLayout, QWidget)
+from PyQt5.QtCore import (Qt, QThread, pyqtSignal)
+from PyQt5.QtWidgets import (QCheckBox, QFileDialog, QGridLayout, QGroupBox, QPlainTextEdit,
+                             QPushButton, QVBoxLayout, QWidget)
 from message_handler import LoggingMessageHandler
 from netmiko import ConnectHandler
 from netmiko.ssh_exception import NetMikoTimeoutException, NetMikoAuthenticationException
 
 
+class LoadThread(QThread):
+    signal = pyqtSignal('PyQt_PyObject')
+    # This Class threads the connection so we don't freeze the entire program waiting on the connection to take place.
+
+    def __init__(self):
+        QThread.__init__(self)
+        self.config = ''
+
+    # run method gets called when we start() the thread
+    def run(self):
+        if self.config == '':
+            self.signal.emit("No config to load.")
+            return
+        if settings.device == []:
+            self.signal.emit("Enter Credentials on Router Info tab.")
+            self.signal.emit("Once entered click Verify.")
+            return
+        if settings.device[0]['device_type'] == 'cisco_ios_serial':
+            device = settings.device[0]
+            try:
+                self.signal.emit('Loading Configuration....')
+                router = ConnectHandler(**device)  # Connect to the Device
+                self.signal.emit('...connected...')
+                router.enable()
+                self.signal.emit('...this may take a while...')
+                router.send_config_set(self.config)
+                new_config = router.send_command('show run')
+                self.signal.emit(new_config)
+                router.disconnect()
+                self.signal.emit('Load Complete')
+            except ValueError:
+                self.signal.emit("Console Error: Make sure you have connectivity.")
+            except TimeoutError:
+                self.signal.emit("Timeout Error: Make sure you are still connected")
+            except NetMikoTimeoutException:
+                self.signal.emit("Timeout Error: Make sure you are still connected")
+            except NetMikoAuthenticationException:
+                self.signal.emit("Check your username/password. Make sure you have an account on this device.")
+        else:
+            device = settings.device[0]
+            try:
+                self.signal.emit('Loading Configuration....')
+                router = ConnectHandler(**device)  # Connect to the Device
+                self.signal.emit('...connected...')
+                router.enable()
+                self.signal.emit('...this may take a while...')
+                router.send_config_set(self.config)
+                new_config = router.send_command('show run')
+                self.signal.emit(new_config)
+                router.disconnect()
+                self.signal.emit('Load Complete')
+            except ValueError:
+                self.signal.emit("User does not have permission to make these changes.")
+            except TimeoutError:
+                self.signal.emit("Telnet Error: Make sure the IP address is correct.")
+            except NetMikoTimeoutException:
+                self.signal.emit("SSH Error: Make sure the IP address is correct.")
+            except NetMikoAuthenticationException:
+                self.signal.emit("Check your username/password. Make sure you have an account on this device.")
+
+
 class LoadPage(QWidget):
     label = "Load"
 
-    def __init__(self):
+    def __init__(self, parent=None):
         """ Initialise the page. """
 
-        super().__init__()
+        super().__init__(parent)
         layout = QGridLayout()  # page will use a grid layout
 
         self.config = ''  # this variable overwritten after config is opened.
         '''Pulls from router tab hopefully'''
-        
-        self._log_viewer = QPlainTextEdit(
-            whatsThis="This displays the messages generated when loading the router.",
-                readOnly=True)
+
+        self._log_viewer = QPlainTextEdit(readOnly=True)
         layout.addWidget(self._log_viewer, 0, 0, 5, 1)
 
-        openfile = QPushButton("Open",
-                            whatsThis="Select IOS configuration to load.",
-                            clicked=self._open
-                            )
+        openfile = QPushButton("Open", clicked=self._open)
+        openfile.setToolTip("Open a text Config.")
         layout.addWidget(openfile, 0, 1)
 
-        build = QPushButton("Load",
-                            whatsThis="Load an IOS configuration. ",
-                            clicked=self._load
-                            )
-        layout.addWidget(build, 2, 1)
+        load_options = QGroupBox("Load Options")
+        load_layout = QVBoxLayout()
 
-        optimisation = QGroupBox("Options")
-        optimisation_layout = QVBoxLayout()
-        
-        self._verify_ios = ''  # Verifies whether the verify IOS button has been checked or not.
-        self._ios_verify = QCheckBox("Verify IOS\n Version",
-                whatsThis="Verify the IOS version before loading.",
-                checked=False, stateChanged=self.ios_verify)
-        optimisation_layout.addWidget(self._ios_verify)
-        
         self._backup_config = ''  # If the box below is checked, write the current config on the box to a text file.
-        self._config_backup = QCheckBox("Backup Current \n Config",
-                whatsThis="Backup current config before starting.",
-                checked=False, stateChanged=self.config_backup)
-        optimisation_layout.addWidget(self._config_backup)
-    
-        optimisation.setLayout(optimisation_layout)
-        layout.addWidget(optimisation, 1, 1)
-    
-        options = QGroupBox("Load Options")
-        options_layout = QGridLayout()
-    
-        options_layout.addWidget(QLabel("test1"), 2, 0)
-        self._resources_edit = QSpinBox(
-                whatsThis="test1",
-                minimum=1)
-        options_layout.addWidget(self._resources_edit, 2, 1)
-    
-        options_layout.addWidget(QLabel("Timeout"), 3, 0)
-        self._timeout_edit = QSpinBox(
-                whatsThis="Number of milliseconds to adjust config load speed",
-                minimum=1)
-        self._timeout_edit.setValue(1)
-        options_layout.addWidget(self._timeout_edit, 3, 1)
+        self._config_backup = QCheckBox("Backup Current \n Config", checked=False,
+                                        stateChanged=self.config_backup)
+        self._config_backup.setToolTip("Optional - backup the current config before loading the new config.")
+        load_layout.addWidget(self._config_backup)
 
-        options.setLayout(options_layout)
-        layout.addWidget(options, 3, 1)
+        load_options.setLayout(load_layout)
+        layout.addWidget(load_options, 1, 1)
 
-        zero = QPushButton("Zeroize",
-                whatsThis="Zeroize the IOS configuration. ",
-                clicked=self._zero)
-        layout.addWidget(zero, 4, 1)
-
-        layout.setRowStretch(4, 1)
+        self.load = QPushButton("Load", clicked=self._load)  # The load button which carries out the load logic.
+        self.load.setToolTip("Load a new configuration.")
+        layout.addWidget(self.load, 2, 1)
+        self.load_thread = LoadThread()
+        self.load_thread.signal.connect(self.finished)
 
         self.setLayout(layout)
+
     '''actions'''
 
     def _open(self, _):
         """ Invoked when the user clicks the open button. """
+        logger = LoggingMessageHandler(bool(), self._log_viewer)
         fltr = "Text or Config (*.txt *.cfg)"
         obj = QFileDialog.getOpenFileName(self, 'Config to Load', '', fltr)
         if obj[0] == '':
             return
         with open(obj[0], 'r') as file:
             config = file.read()
-            logger = LoggingMessageHandler(bool(), self._log_viewer)
             logger.clear()
             logger.status_message(config)
-            self.config = config
+            logger.status_message('Remove extra lines from the text file, such as:\n '
+                                  ' enable \n config t \n building \n'
+                                  ' version \n etc...')
+            self.load_thread.config = config
 
-    def _load(self, _):
-        """ Invoked when the user clicks the load button. """
+    def _load(self):
+        self.load_thread.start()
+
+    def finished(self, result):
         logger = LoggingMessageHandler(bool(), self._log_viewer)
-        if self.config == '':
-            logger.clear()
-            logger.status_message("No config to load.")
-            return
-        if settings.device == []:
-            logger.clear()
-            logger.status_message("Enter Credentials on Router Info tab.")
-            logger.status_message("Once entered click Verify.")
-            return
-        if settings.device[0]['device_type'] == 'cisco_ios_serial':
-            logger.clear()
-            device = settings.device[0]
-            try:
-                router = ConnectHandler(**device)  # Connect to the Device
-                logger.status_message("Loading Configuration....")
-                if self._verify_ios == 'yes':
-                    logger.status_message("Verifying Cisco IOS version.")
-                    router.send_command("show version")
-                    
-                if self._backup_config == 'yes':
-                    logger.status_message("Backing up the current config.")
-                    router.send_command("show run")
-                enable = router.check_enable_mode
-                if enable == False:
-                    router.enable()
-                    pass
-                router.config_mode()
-                for line in self.config.text()
-                    router.send_command(line, delay_factor=4)
-                    logger.status_message(line)
-                
-                router.disconnect()
-                logger.status_message('Load Complete')
-            except ValueError:
-                logger.status_message("Console is not working. Make sure you have connectivity.")
-            except TimeoutError:
-                logger.status_message("Telnet Error: Make sure the IP address is correct.")
-            except NetMikoTimeoutException:
-                logger.status_message("SSH Error: Make sure the IP address is correct.")
-            except NetMikoAuthenticationException:
-                logger.status_message("Check your username/password. Make sure you have an account on this device.")
-            pass
-            logger.status_message("Load Complete")
-        else:
-            logger.clear()
-            device = settings.device[0]
-            try:
-                router = ConnectHandler(**device)  # Connect to the Device
-                logger.status_message("Loading Configuration....")
-                if self._verify_ios == 'yes':
-                    logger.status_message("Verifying Cisco IOS version.")
-                    router.send_command("show version")
-                    
-                if self._backup_config == 'yes':
-                    logger.status_message("Backing up the current config.")
-                    router.send_command("show run")
-                
-                router.send_config_set(self.config, delay_factor=4)
-                
-                router.disconnect()
-                logger.status_message('Load Complete')
-            except ValueError:
-                logger.status_message("Console is not working. Make sure you have connectivity.")
-            except TimeoutError:
-                logger.status_message("Telnet Error: Make sure the IP address is correct.")
-            except NetMikoTimeoutException:
-                logger.status_message("SSH Error: Make sure the IP address is correct.")
-            except NetMikoAuthenticationException:
-                logger.status_message("Check your username/password. Make sure you have an account on this device.")
-            pass
-            logger.status_message("Load Complete")
+        logger.status_message(result)
 
-    def ios_verify(self, state):
-        """ Invoked when the user clicks on the no asserts button. """
-        
-        if state == Qt.Checked:
-            self._verify_ios = 'yes'
-        
     def config_backup(self, state):
-        """ Invoked when the user clicks on the no docstrings button. """
-        
+        """ currently not operational """
+
         if state == Qt.Checked:
             self._backup_config = 'yes'
-
-    def _run_qmake_changed(self, state):
-        """ Invoked when the user clicks on the run qmake button. """
-
-        if state == Qt.Unchecked:
-            self._run_make_button.setCheckState(Qt.Unchecked)
-        
-    def _run_make_changed(self, state):
-        """ Invoked when the user clicks on the run make button. """
-        
-        if state == Qt.Unchecked:
-            self._run_application_button.setCheckState(Qt.Unchecked)
-        else:
-            self._run_qmake_button.setCheckState(Qt.Checked)
-        
-    def _zero(self, _):
-        """ Invoked when the user clicks on the run application button. """
-        logger = LoggingMessageHandler(bool(),
-                                       self._log_viewer)
-
-        logger.clear()
-        logger.status_message("Zeroizing Configuration")
